@@ -1,0 +1,17 @@
+{
+    "data": "cifar10",
+    "model": "Net",
+    "model_pt_path": "None",
+    "device": "cpu",
+    "server_device": "cuda",
+    "server_pretrain_epoch": 10,
+    "fraction_fit": 0.025,
+    "fraction_evaluate": 0.0,
+    "min_fit_clients": 20,
+    "min_evaluate_clients": 0,
+    "min_available_clients": 20,
+    "num_clients": 1000,
+    "batch_size": 32,
+    "num_rounds": 3,
+    "local_epoch": 3
+}
