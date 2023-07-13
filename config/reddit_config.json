@@ -1,7 +1,7 @@
 {
     "data": "reddit",
     "model": "lstm",
-    "model_pt_path": "/home/hyeongikim/Desktop/FL/model_pt/lstm.pt",
+    "model_pt_path": "None",
     "device": "cpu",
     "server_device": "cuda",
     "server_pretrain_epoch": 1,
@@ -10,14 +10,15 @@
     "min_fit_clients": 50,
     "min_evaluate_clients": 0,
     "min_available_clients": 50,
-    "num_clients": 80000,
+    "num_clients": 10000,
     "batch_size": 32,
-    "num_rounds": 1500,
+    "num_rounds": 2500,
     "local_epoch": 3,
     "embedding_dim": 64,
     "hidden_dim": 64,
     "num_layers": 2,
     "dropout_rate": 0.2,
     "tie_weights": "True",
-    "lr": 1e-3
+    "lr": 1e-3,
+    "sparse_dense": 1
 }

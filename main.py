@@ -35,14 +35,14 @@ def main(parser):
     config_dir = Path(args.config_dir)
     # tensorboard
     writer = SummaryWriter()
-    config = Config(json_path=config_dir / "cifar10_config.json")
+    config = Config(json_path=config_dir / "reddit_config.json")
     print(
         f"Training on {config.device} using PyTorch {torch.__version__} and Flower {fl.__version__}"
     )
     NUM_CLIENTS = config.num_clients
     BATCH_SIZE = config.batch_size
 
-    client_resources = None
+    client_resources = {"num_cpus": 24}
     if config.device == "cuda":
         client_resources = {"num_gpus": 1}
     trainloaders, valloaders, _, server_testloader = load_dataset(config)

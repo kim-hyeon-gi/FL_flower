@@ -1,6 +1,7 @@
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import flwr as fl
+import numpy as np
 import torch
 from flwr.common import (
     EvaluateIns,
@@ -11,8 +12,6 @@ from flwr.common import (
     NDArrays,
     Parameters,
     Scalar,
-    ndarrays_to_parameters,
-    parameters_to_ndarrays,
 )
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
@@ -20,7 +19,13 @@ from flwr.server.strategy.aggregate import aggregate, weighted_loss_avg
 from torch.utils.tensorboard import SummaryWriter
 
 from model.utils import load_model, model_pretraining, test
-from utils import get_parameters, set_parameters
+from utils import (
+    get_parameters,
+    ndarrays_to_sparse_parameters,
+    set_parameters,
+    sparse_parameters_to_ndarrays,
+    sum_grad,
+)
 
 
 class FedCustom(fl.server.strategy.Strategy):
@@ -38,6 +43,7 @@ class FedCustom(fl.server.strategy.Strategy):
             self.pt_path = model_pretraining(config)
         self.model = torch.load(self.pt_path).to(config.server_device)
         self.writer = writer
+        self.structure = []
 
     def __repr__(self) -> str:
         return "FedCustom"
@@ -48,6 +54,8 @@ class FedCustom(fl.server.strategy.Strategy):
         """Initialize global model parameters."""
 
         ndarrays = get_parameters(self.model)
+        for i in ndarrays:
+            self.structure.append(tuple(np.shape(i)))
         return fl.common.ndarrays_to_parameters(ndarrays)
 
     def configure_fit(
@@ -71,12 +79,16 @@ class FedCustom(fl.server.strategy.Strategy):
             "server_round": server_round,
             "local_epochs": 3,
             "device": self.config.device,
+            "sparse_dense": self.config.sparse_dense,
+            "structure": self.structure,
         }
         higher_lr_config = {
             "lr": 0.003,
             "server_round": server_round,
             "local_epochs": 3,
             "device": self.config.device,
+            "sparse_dense": self.config.sparse_dense,
+            "structure": self.structure,
         }
         fit_configurations = []
         for idx, client in enumerate(clients):
@@ -97,12 +109,18 @@ class FedCustom(fl.server.strategy.Strategy):
         """Aggregate fit results using weighted average."""
 
         weights_results = [
-            (parameters_to_ndarrays(fit_res.parameters), fit_res.num_examples)
+            (
+                sparse_parameters_to_ndarrays(fit_res.parameters, self.structure),
+                fit_res.num_examples,
+            )
             for _, fit_res in results
         ]
-        parameters_aggregated = ndarrays_to_parameters(aggregate(weights_results))
+        parameters_aggregated = aggregate(weights_results)
         metrics_aggregated = {}
-        return parameters_aggregated, metrics_aggregated
+        param = ndarrays_to_sparse_parameters(
+            sum_grad(self.model, parameters_aggregated)
+        )
+        return param, metrics_aggregated
 
     def configure_evaluate(
         self, server_round: int, parameters: Parameters, client_manager: ClientManager
@@ -150,7 +168,9 @@ class FedCustom(fl.server.strategy.Strategy):
 
         """Evaluate global model parameters using an evaluation function."""
         test_loader = self.test_loader
-        parameters = parameters_to_ndarrays(parameters)
+
+        parameters = sparse_parameters_to_ndarrays(parameters, self.structure)
+
         set_parameters(
             self.model, parameters
         )  # Update model with the latest parameters

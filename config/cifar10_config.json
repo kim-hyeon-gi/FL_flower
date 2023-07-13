@@ -5,13 +5,14 @@
     "device": "cpu",
     "server_device": "cuda",
     "server_pretrain_epoch": 10,
-    "fraction_fit": 0.025,
+    "fraction_fit": 1,
     "fraction_evaluate": 0.0,
-    "min_fit_clients": 20,
+    "min_fit_clients": 100,
     "min_evaluate_clients": 0,
-    "min_available_clients": 20,
-    "num_clients": 1000,
-    "batch_size": 32,
-    "num_rounds": 3,
-    "local_epoch": 3
+    "min_available_clients": 100,
+    "num_clients": 100,
+    "batch_size": 64,
+    "num_rounds": 2500,
+    "local_epoch": 1,
+    "sparse_dense": 1
 }

@@ -1,4 +1,5 @@
 import flwr as fl
+import numpy as np
 from flwr.common import (
     Code,
     EvaluateIns,
@@ -8,12 +9,17 @@ from flwr.common import (
     GetParametersIns,
     GetParametersRes,
     Status,
-    ndarrays_to_parameters,
-    parameters_to_ndarrays,
 )
 
 from model.utils import load_model, test, train
-from utils import Config, get_parameters, set_parameters
+from utils import (
+    Config,
+    get_grad,
+    get_parameters,
+    ndarrays_to_sparse_parameters,
+    set_parameters,
+    sparse_parameters_to_ndarrays,
+)
 
 
 class FlowerClient(fl.client.Client):
@@ -27,10 +33,10 @@ class FlowerClient(fl.client.Client):
         print(f"[Client {self.cid}] get_parameters")
 
         # Get parameters as a list of NumPy ndarray's
-        ndarrays: List[np.ndarray] = get_parameters(self.net)
+        ndarrays: List[np.ndarray] = get_grad(self.net)
 
         # Serialize ndarray's into a Parameters object
-        parameters = ndarrays_to_parameters(ndarrays)
+        parameters = ndarrays_to_sparse_parameters(ndarrays)
 
         # Build and return response
         status = Status(code=Code.OK, message="Success")
@@ -44,8 +50,9 @@ class FlowerClient(fl.client.Client):
         config = ins.config
         # Deserialize parameters to NumPy ndarray's
         parameters_original = ins.parameters
-        ndarrays_original = parameters_to_ndarrays(parameters_original)
-
+        ndarrays_original = sparse_parameters_to_ndarrays(
+            parameters_original, config["structure"]
+        )
         # Update local model, train, get updated parameters
         set_parameters(self.net, ndarrays_original)
         train(
@@ -54,9 +61,15 @@ class FlowerClient(fl.client.Client):
             device=config["device"],
             epochs=config["local_epochs"],
         )
+        ndarrays_updated = get_parameters(self.net)
+        params = []
+
+        for i in range(len(ndarrays_updated)):
+            arr = ndarrays_updated[i] - ndarrays_original[i]
+            params.append(arr)
 
         # Serialize ndarray's into a Parameters object
-        parameters_updated = ndarrays_to_parameters(ndarrays_updated)
+        parameters_updated = ndarrays_to_sparse_parameters(params)
 
         # Build and return response
         status = Status(code=Code.OK, message="Success")
@@ -72,7 +85,7 @@ class FlowerClient(fl.client.Client):
 
         # Deserialize parameters to NumPy ndarray's
         parameters_original = ins.parameters
-        ndarrays_original = parameters_to_ndarrays(parameters_original)
+        ndarrays_original = sparse_parameters_to_ndarrays(parameters_original)
 
         set_parameters(self.net, ndarrays_original)
         loss, accuracy = test(self.net, self.valloader)
@@ -86,35 +99,3 @@ class FlowerClient(fl.client.Client):
             num_examples=len(self.valloader),
             metrics={"accuracy": float(accuracy)},
         )
-
-
-# class FlowerClient(fl.client.NumPyClient):
-#     def __init__(self, cid, net, trainloader, valloader):
-#         self.cid = cid
-#         self.net = net
-#         self.trainloader = trainloader
-#         self.valloader = valloader
-
-#     def get_parameters(self, config):
-#         print(f"[Client {self.cid}] get_parameters")
-#         return get_parameters(self.net)
-
-#     def fit(self, parameters, config):
-#         # Read values from config
-#         server_round = config["server_round"]
-#         local_epochs = config["local_epochs"]
-
-#         # Use values provided by the config
-#         print(f"[Client {self.cid}, round {server_round}] fit, config: {config}")
-#         set_parameters(self.net, parameters)
-#         train(self.net, self.trainloader, device=config["device"], epochs=local_epochs)
-#         return get_parameters(self.net), len(self.trainloader), {}
-
-#     def evaluate(self, parameters, config):
-#         server_round = config["server_round"]
-#         set_parameters(self.net, parameters)
-#         loss, accuracy = test(self.net, self.valloader)
-#         print(
-#             f"[Client {self.cid}] evaluate,server_round : {server_round}, config: {config} , accuracy : {accuracy}"
-#         )
-#         return float(loss), len(self.valloader), {"accuracy": float(accuracy)}
