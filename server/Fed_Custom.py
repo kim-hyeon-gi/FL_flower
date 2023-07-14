@@ -1,3 +1,4 @@
+from functools import reduce
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import flwr as fl
@@ -15,7 +16,7 @@ from flwr.common import (
 )
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
-from flwr.server.strategy.aggregate import aggregate, weighted_loss_avg
+from flwr.server.strategy.aggregate import weighted_loss_avg
 from torch.utils.tensorboard import SummaryWriter
 
 from model.utils import load_model, model_pretraining, test
@@ -109,22 +110,29 @@ class FedCustom(fl.server.strategy.Strategy):
     ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
         """Aggregate fit results using weighted average."""
 
-        weights_results = [
-            (
-                sparse_parameters_to_ndarrays(
-                    fit_res.parameters,
-                    self.structure,
-                    self.config.sparse_dense,
-                    fit_res.random_state,
-                ),
-                fit_res.num_examples,
+        parameters = []
+        sparse_matrixes = []
+        for _, fit_res in results:
+            params = sparse_parameters_to_ndarrays(
+                fit_res.parameters,
+                self.structure,
+                self.config.sparse_dense,
+                fit_res.random_state,
+                s_matrix=True,
             )
-            for _, fit_res in results
-        ]
-        parameters_aggregated = aggregate(weights_results)
+            for param in params:
+                parameters.append(param[0])
+                sparse_matrixes.append(param[1])
+
+        parameters_aggregated = self.aggregate(parameters)
+        sparse_aggregated = self.aggregate(sparse_matrixes)
+        result = []
+        for p, s in zip(parameters_aggregated, sparse_matrixes):
+            result.append(p / (s + 1))
+
         metrics_aggregated = {}
         param = ndarrays_to_sparse_parameters(
-            sum_grad(self.model, parameters_aggregated), self.structure, 1
+            sum_grad(self.model, result), self.structure, 1
         )
         return param, metrics_aggregated
 
@@ -201,3 +209,10 @@ class FedCustom(fl.server.strategy.Strategy):
         """Use a fraction of available clients for evaluation."""
         num_clients = int(num_available_clients * self.fraction_evaluate)
         return max(num_clients, self.min_evaluate_clients), self.min_available_clients
+
+    def aggregate(self, ndarray_list):
+        weighted_weights = [[layer for layer in weights] for weights in ndarray_list]
+        weights = [
+            reduce(np.add, layer_updates) for layer_updates in zip(*weighted_weights)
+        ]
+        return weights

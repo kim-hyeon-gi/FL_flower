@@ -110,7 +110,7 @@ def ndarrays_to_sparse_parameters(
 
 
 def sparse_parameters_to_ndarrays(
-    parameters: Parameters, structure, sparse_dense, random_state=[]
+    parameters: Parameters, structure, sparse_dense, random_state=[], s_matrix=False
 ) -> NDArrays:
     """Convert parameters object to NumPy ndarrays."""
     if sparse_dense == 1:
@@ -118,9 +118,8 @@ def sparse_parameters_to_ndarrays(
     else:
         random_state = np.random.rand(len(structure))
 
-    parameters.tensors
     return [
-        sparse_bytes_to_ndarray(tensor, size, sparse_dense, random)
+        sparse_bytes_to_ndarray(tensor, size, sparse_dense, random, s_matrix)
         for tensor, size, random in zip(parameters.tensors, structure, random_state)
     ]
 
@@ -174,7 +173,9 @@ def ndarray_to_sparse_bytes(ndarray: NDArray, size, sparse_dense, random) -> byt
     return bytes_io.getvalue()
 
 
-def sparse_bytes_to_ndarray(tensor: bytes, size, sparse_dense, random) -> NDArray:
+def sparse_bytes_to_ndarray(
+    tensor: bytes, size, sparse_dense, random, s_matrix
+) -> NDArray:
     """Deserialize NumPy ndarray from bytes."""
     bytes_io = BytesIO(tensor)
     # WARNING: NEVER set allow_pickle to true.
@@ -207,4 +208,7 @@ def sparse_bytes_to_ndarray(tensor: bytes, size, sparse_dense, random) -> NDArra
     if len(size) != 2:
         ndarray_deserialized = ndarray_deserialized.reshape(size)
 
-    return cast(NDArray, ndarray_deserialized)
+    if s_matrix:
+        return (cast(NDArray, ndarray_deserialized), sparse_matrix.toarray())
+    else:
+        return cast(NDArray, ndarray_deserialized)
