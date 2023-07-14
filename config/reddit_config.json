@@ -20,5 +20,5 @@
     "dropout_rate": 0.2,
     "tie_weights": "True",
     "lr": 1e-3,
-    "sparse_dense": 1
+    "sparse_dense": 0.5
 }

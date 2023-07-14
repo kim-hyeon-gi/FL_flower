@@ -1,11 +1,45 @@
 import json
 from collections import OrderedDict
+from dataclasses import dataclass
+from enum import Enum
 from io import BytesIO
-from typing import Callable, Dict, List, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
 
 import numpy as np
+import scipy
 import torch
 from flwr.common.typing import NDArray, NDArrays, Parameters
+
+Scalar = Union[bool, bytes, float, int, str]
+
+
+class Code(Enum):
+    """Client status codes."""
+
+    OK = 0
+    GET_PROPERTIES_NOT_IMPLEMENTED = 1
+    GET_PARAMETERS_NOT_IMPLEMENTED = 2
+    FIT_NOT_IMPLEMENTED = 3
+    EVALUATE_NOT_IMPLEMENTED = 4
+
+
+@dataclass
+class Status:
+    """Client status."""
+
+    code: Code
+    message: str
+
+
+@dataclass
+class FitRes:
+    """Fit response from a client."""
+
+    status: Status
+    parameters: Parameters
+    num_examples: int
+    random_state: List
+    metrics: Dict[str, Scalar]
 
 
 class Config:
@@ -61,81 +95,118 @@ def sum_grad(net, grad):
     return param
 
 
-def ndarrays_to_sparse_parameters(ndarrays: NDArrays) -> Parameters:
-    """Convert NumPy ndarrays to parameters object."""
-    tensors = []
-    for ndarray in ndarrays:
-        tensors.append(ndarray_to_sparse_bytes(ndarray))
-    return Parameters(tensors=tensors, tensor_type="numpy.ndarray")
-
-
-def client_ndarrays_to_sparse_parameters(
-    ndarrays: NDArrays, sparse_dense=1
+def ndarrays_to_sparse_parameters(
+    ndarrays: NDArrays, structure, sparse_dense, random_state=[]
 ) -> Parameters:
     """Convert NumPy ndarrays to parameters object."""
-    tensors = [ndarray_to_sparse_bytes(ndarray) for ndarray in ndarrays]
-    return Parameters(tensors=tensors, tensor_type="numpy.ndarray")
+    if sparse_dense == 1:
+        random_state = [1 for i in range(len(structure))]
+
+    tensors = []
+    for ndarray, size, random in zip(ndarrays, structure, random_state):
+        tensors.append(ndarray_to_sparse_bytes(ndarray, size, sparse_dense, random))
+    return Parameters(tensors=tensors, tensor_type="numpy.ndarray"), random_state
 
 
-def sparse_parameters_to_ndarrays(parameters: Parameters, structure) -> NDArrays:
+def sparse_parameters_to_ndarrays(
+    parameters: Parameters, structure, sparse_dense, random_state=[]
+) -> NDArrays:
     """Convert parameters object to NumPy ndarrays."""
+    if sparse_dense == 1:
+        random_state = [1 for i in range(len(structure))]
+    else:
+        random_state = np.random.rand(len(structure))
     return [
-        sparse_bytes_to_ndarray(tensor, size)
-        for tensor, size in zip(parameters.tensors, structure)
+        sparse_bytes_to_ndarray(tensor, size, sparse_dense, random)
+        for tensor, size, random in zip(parameters.tensors, structure, random_state)
     ]
 
 
-def ndarray_to_sparse_bytes(ndarray: NDArray) -> bytes:
+def ndarray_to_sparse_bytes(ndarray: NDArray, size, sparse_dense, random) -> bytes:
     """Serialize NumPy ndarray to bytes."""
     bytes_io = BytesIO()
-    if len(ndarray.shape) > 1:
-        if len(ndarray.shape) > 2:
-            ndarray = ndarray.reshape(-1, ndarray.shape[-1])
-        # We convert our ndarray into a sparse matrix
 
-        ndarray = torch.tensor(ndarray).to_sparse_csr()
+    if len(ndarray.shape) > 2:
+        ndarray = ndarray.reshape(-1, ndarray.shape[-1])
+    elif len(ndarray.shape) == 1:
+        ndarray = ndarray.reshape(-1, 1)
+    # We convert our ndarray into a sparse matrix
 
-        # And send it by utilizng the sparse matrix attributes
-        # WARNING: NEVER set allow_pickle to true.
-        # Reason: loading pickled data can execute arbitrary code
-        # Source: https://numpy.org/doc/stable/reference/generated/numpy.save.html
-        np.savez(
-            bytes_io,  # type: ignore
-            crow_indices=ndarray.crow_indices(),
-            col_indices=ndarray.col_indices(),
-            values=ndarray.values(),
-            allow_pickle=False,
-        )
-    else:
-        # WARNING: NEVER set allow_pickle to true.
-        # Reason: loading pickled data can execute arbitrary code
-        # Source: https://numpy.org/doc/stable/reference/generated/numpy.save.html
-        np.save(bytes_io, ndarray, allow_pickle=False)
+    zero_list = np.where(ndarray == 0)
+    sparse_matrix = scipy.sparse.random(
+        ndarray.shape[0],
+        ndarray.shape[1],
+        density=sparse_dense,
+        format="csr",
+        dtype=None,
+        random_state=random,
+        data_rvs=np.ones,
+    ).toarray()
+    ndarray = ndarray.mul(sparse_matrix)
+    ndarray = torch.tensor(ndarray).to_sparse_csr()
+    values = ndarray.values().numpy()
+
+    # insert original zero value
+
+    for t in zero_list:
+        count = 0
+        for i in sparse_matrix.indices[t[0] :]:
+            if t[1] == i:
+                values = np.insert(values, sparse_matrix.indptr[t[0]] + count, 0)
+                break
+            else:
+                count = count + 1
+
+    # And send it by utilizng the sparse matrix attributes
+    # WARNING: NEVER set allow_pickle to true.
+    # Reason: loading pickled data can execute arbitrary code
+    # Source: https://numpy.org/doc/stable/reference/generated/numpy.save.html
+    np.save(
+        bytes_io,  # type: ignore
+        values=values,
+        allow_pickle=False,
+    )
+
     return bytes_io.getvalue()
 
 
-def sparse_bytes_to_ndarray(tensor: bytes, size) -> NDArray:
+def sparse_bytes_to_ndarray(tensor: bytes, size, sparse_dense, random) -> NDArray:
     """Deserialize NumPy ndarray from bytes."""
     bytes_io = BytesIO(tensor)
     # WARNING: NEVER set allow_pickle to true.
     # Reason: loading pickled data can execute arbitrary code
     # Source: https://numpy.org/doc/stable/reference/generated/numpy.load.html
     loader = np.load(bytes_io, allow_pickle=False)  # type: ignore
+    shape = size
+    if len(size) > 2:
+        m = 1
+        for i in size[:-1]:
+            m = m * i
+        shape = [m, size[-1]]
+    elif len(size) == 1:
+        shape = (size[0], 1)
+    sparse_matrix = scipy.sparse.random(
+        shape[0],
+        shape[1],
+        density=sparse_dense,
+        format="csr",
+        dtype=None,
+        random_state=random,
+        data_rvs=np.ones,
+    )
 
-    if "crow_indices" in loader:
-        # We convert our sparse matrix back to a ndarray, using the attributes we sent
+    # We convert our sparse matrix back to a ndarray, using the attributes we sent
 
-        ndarray_deserialized = (
-            torch.sparse_csr_tensor(
-                crow_indices=loader["crow_indices"],
-                col_indices=loader["col_indices"],
-                values=loader["values"],
-            )
-            .to_dense()
-            .numpy()
+    ndarray_deserialized = (
+        torch.sparse_csr_tensor(
+            crow_indices=sparse_matrix.indptr,
+            col_indices=sparse_matrix.indices,
+            values=loader,
         )
-        if len(size) > 2:
-            ndarray_deserialized = ndarray_deserialized.reshape(size)
-    else:
-        ndarray_deserialized = loader
+        .to_dense()
+        .numpy()
+    )
+    if len(size) != 2:
+        ndarray_deserialized = ndarray_deserialized.reshape(size)
+
     return cast(NDArray, ndarray_deserialized)

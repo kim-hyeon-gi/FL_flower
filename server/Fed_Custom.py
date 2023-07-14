@@ -110,7 +110,12 @@ class FedCustom(fl.server.strategy.Strategy):
 
         weights_results = [
             (
-                sparse_parameters_to_ndarrays(fit_res.parameters, self.structure),
+                sparse_parameters_to_ndarrays(
+                    fit_res.parameters,
+                    self.structure,
+                    self.config.sparse_dense,
+                    fit_res.random_state,
+                ),
                 fit_res.num_examples,
             )
             for _, fit_res in results
@@ -118,7 +123,7 @@ class FedCustom(fl.server.strategy.Strategy):
         parameters_aggregated = aggregate(weights_results)
         metrics_aggregated = {}
         param = ndarrays_to_sparse_parameters(
-            sum_grad(self.model, parameters_aggregated)
+            sum_grad(self.model, parameters_aggregated), self.structure, 1
         )
         return param, metrics_aggregated
 
@@ -168,8 +173,11 @@ class FedCustom(fl.server.strategy.Strategy):
 
         """Evaluate global model parameters using an evaluation function."""
         test_loader = self.test_loader
-
-        parameters = sparse_parameters_to_ndarrays(parameters, self.structure)
+        parameters = sparse_parameters_to_ndarrays(
+            parameters,
+            self.structure,
+            1,
+        )
 
         set_parameters(
             self.model, parameters

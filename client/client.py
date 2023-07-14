@@ -5,7 +5,6 @@ from flwr.common import (
     EvaluateIns,
     EvaluateRes,
     FitIns,
-    FitRes,
     GetParametersIns,
     GetParametersRes,
     Status,
@@ -14,6 +13,7 @@ from flwr.common import (
 from model.utils import load_model, test, train
 from utils import (
     Config,
+    FitRes,
     get_grad,
     get_parameters,
     ndarrays_to_sparse_parameters,
@@ -51,7 +51,7 @@ class FlowerClient(fl.client.Client):
         # Deserialize parameters to NumPy ndarray's
         parameters_original = ins.parameters
         ndarrays_original = sparse_parameters_to_ndarrays(
-            parameters_original, config["structure"]
+            parameters_original, config["structure"], 1
         )
         # Update local model, train, get updated parameters
         set_parameters(self.net, ndarrays_original)
@@ -69,7 +69,9 @@ class FlowerClient(fl.client.Client):
             params.append(arr)
 
         # Serialize ndarray's into a Parameters object
-        parameters_updated = ndarrays_to_sparse_parameters(params)
+        parameters_updated, random_state = ndarrays_to_sparse_parameters(
+            params, config["structure"], config["sparse_dense"]
+        )
 
         # Build and return response
         status = Status(code=Code.OK, message="Success")
@@ -77,6 +79,7 @@ class FlowerClient(fl.client.Client):
             status=status,
             parameters=parameters_updated,
             num_examples=len(self.trainloader),
+            random_state=random_state,
             metrics={},
         )
 
