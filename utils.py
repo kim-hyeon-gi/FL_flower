@@ -9,6 +9,7 @@ import numpy as np
 import scipy
 import torch
 from flwr.common.typing import NDArray, NDArrays, Parameters
+from scipy.sparse import csr_array
 
 Scalar = Union[bool, bytes, float, int, str]
 
@@ -116,6 +117,8 @@ def sparse_parameters_to_ndarrays(
         random_state = [1 for i in range(len(structure))]
     else:
         random_state = np.random.rand(len(structure))
+
+    parameters.tensors
     return [
         sparse_bytes_to_ndarray(tensor, size, sparse_dense, random)
         for tensor, size, random in zip(parameters.tensors, structure, random_state)
@@ -141,18 +144,19 @@ def ndarray_to_sparse_bytes(ndarray: NDArray, size, sparse_dense, random) -> byt
         dtype=None,
         random_state=random,
         data_rvs=np.ones,
-    ).toarray()
-    ndarray = ndarray.mul(sparse_matrix)
+    )
+    ndarray = ndarray * sparse_matrix.toarray()
     ndarray = torch.tensor(ndarray).to_sparse_csr()
     values = ndarray.values().numpy()
 
     # insert original zero value
 
-    for t in zero_list:
+    for row, col in zip(zero_list[0], zero_list[1]):
         count = 0
-        for i in sparse_matrix.indices[t[0] :]:
-            if t[1] == i:
-                values = np.insert(values, sparse_matrix.indptr[t[0]] + count, 0)
+
+        for i in sparse_matrix.indices[sparse_matrix.indptr[row] :]:
+            if col == i:
+                values = np.insert(values, sparse_matrix.indptr[row] + count, 0)
                 break
             else:
                 count = count + 1
@@ -163,7 +167,7 @@ def ndarray_to_sparse_bytes(ndarray: NDArray, size, sparse_dense, random) -> byt
     # Source: https://numpy.org/doc/stable/reference/generated/numpy.save.html
     np.save(
         bytes_io,  # type: ignore
-        values=values,
+        values,
         allow_pickle=False,
     )
 
@@ -182,9 +186,10 @@ def sparse_bytes_to_ndarray(tensor: bytes, size, sparse_dense, random) -> NDArra
         m = 1
         for i in size[:-1]:
             m = m * i
-        shape = [m, size[-1]]
+        shape = (m, size[-1])
     elif len(size) == 1:
         shape = (size[0], 1)
+
     sparse_matrix = scipy.sparse.random(
         shape[0],
         shape[1],
@@ -194,18 +199,11 @@ def sparse_bytes_to_ndarray(tensor: bytes, size, sparse_dense, random) -> NDArra
         random_state=random,
         data_rvs=np.ones,
     )
-
     # We convert our sparse matrix back to a ndarray, using the attributes we sent
+    ndarray_deserialized = csr_array(
+        (loader, sparse_matrix.indices, sparse_matrix.indptr), shape=shape
+    ).toarray()
 
-    ndarray_deserialized = (
-        torch.sparse_csr_tensor(
-            crow_indices=sparse_matrix.indptr,
-            col_indices=sparse_matrix.indices,
-            values=loader,
-        )
-        .to_dense()
-        .numpy()
-    )
     if len(size) != 2:
         ndarray_deserialized = ndarray_deserialized.reshape(size)
 

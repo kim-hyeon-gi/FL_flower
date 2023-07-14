@@ -56,7 +56,8 @@ class FedCustom(fl.server.strategy.Strategy):
         ndarrays = get_parameters(self.model)
         for i in ndarrays:
             self.structure.append(tuple(np.shape(i)))
-        return fl.common.ndarrays_to_parameters(ndarrays)
+        parameters, _ = ndarrays_to_sparse_parameters(ndarrays, self.structure, 1)
+        return parameters
 
     def configure_fit(
         self, server_round: int, parameters: Parameters, client_manager: ClientManager
@@ -173,6 +174,7 @@ class FedCustom(fl.server.strategy.Strategy):
 
         """Evaluate global model parameters using an evaluation function."""
         test_loader = self.test_loader
+
         parameters = sparse_parameters_to_ndarrays(
             parameters,
             self.structure,
