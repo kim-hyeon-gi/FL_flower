@@ -4,7 +4,7 @@
     "model_pt_path": "None",
     "device": "cpu",
     "server_device": "cuda",
-    "server_pretrain_epoch": 10,
+    "server_pretrain_epoch": 20,
     "fraction_fit": 1,
     "fraction_evaluate": 0.0,
     "min_fit_clients": 100,
