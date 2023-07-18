@@ -35,7 +35,7 @@ def main(parser):
     config_dir = Path(args.config_dir)
     # tensorboard
     writer = SummaryWriter()
-    config = Config(json_path=config_dir / "reddit_config.json")
+    config = Config(json_path=config_dir / "cifar10_config.json")
     print(
         f"Training on {config.device} using PyTorch {torch.__version__} and Flower {fl.__version__}"
     )

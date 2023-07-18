@@ -14,6 +14,7 @@ from model.utils import load_model, test, train
 from utils import (
     Config,
     FitRes,
+    efficient_communication_ndarrays_to_sparse_parameters,
     get_grad,
     get_parameters,
     ndarrays_to_sparse_parameters,
@@ -33,7 +34,7 @@ class FlowerClient(fl.client.Client):
         print(f"[Client {self.cid}] get_parameters")
 
         # Get parameters as a list of NumPy ndarray's
-        ndarrays: List[np.ndarray] = get_grad(self.net)
+        ndarrays: List[np.ndarray] = get_parameters(self.net)
 
         # Serialize ndarray's into a Parameters object
         parameters = ndarrays_to_sparse_parameters(ndarrays)
@@ -51,7 +52,7 @@ class FlowerClient(fl.client.Client):
         # Deserialize parameters to NumPy ndarray's
         parameters_original = ins.parameters
         ndarrays_original = sparse_parameters_to_ndarrays(
-            parameters_original, config["structure"], 1
+            parameters_original, config["structure"]
         )
         # Update local model, train, get updated parameters
         set_parameters(self.net, ndarrays_original)
@@ -63,15 +64,21 @@ class FlowerClient(fl.client.Client):
         )
         ndarrays_updated = get_parameters(self.net)
         params = []
-
+        random_state = []
         for i in range(len(ndarrays_updated)):
             arr = ndarrays_updated[i] - ndarrays_original[i]
             params.append(arr)
 
         # Serialize ndarray's into a Parameters object
-        parameters_updated, random_state = ndarrays_to_sparse_parameters(
-            params, config["structure"], config["sparse_dense"]
-        )
+        if config["sparse_dense"] == 1:
+            parameters_updated = ndarrays_to_sparse_parameters(params)
+        else:
+            (
+                parameters_updated,
+                random_state,
+            ) = efficient_communication_ndarrays_to_sparse_parameters(
+                params, config["structure"], config["sparse_dense"]
+            )
 
         # Build and return response
         status = Status(code=Code.OK, message="Success")
@@ -88,7 +95,9 @@ class FlowerClient(fl.client.Client):
 
         # Deserialize parameters to NumPy ndarray's
         parameters_original = ins.parameters
-        ndarrays_original = sparse_parameters_to_ndarrays(parameters_original)
+        ndarrays_original = sparse_parameters_to_ndarrays(
+            parameters_original, self.config["structure"]
+        )
 
         set_parameters(self.net, ndarrays_original)
         loss, accuracy = test(self.net, self.valloader)
