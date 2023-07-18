@@ -8,6 +8,9 @@ runs
 
 */__pycache__
 __pycache__
-client/__pycache__
-server/__pycache__
+client/__pycache__/*.pyc
+server/__pycache__/*.pyc
 *.pyc
+__pycache__/*.pyc
+dataset/__pycache__/*.pyc
+model/__pycache__/*.pyc
