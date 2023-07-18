@@ -1,3 +1,4 @@
+from functools import reduce
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import flwr as fl
@@ -20,6 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from model.utils import load_model, model_pretraining, test
 from utils import (
+    efficient_communication_sparse_parameters_to_ndarrays,
     get_parameters,
     ndarrays_to_sparse_parameters,
     set_parameters,
@@ -55,8 +57,10 @@ class FedCustom(fl.server.strategy.Strategy):
 
         ndarrays = get_parameters(self.model)
         for i in ndarrays:
-            self.structure.append(tuple(np.shape(i)))
-        return fl.common.ndarrays_to_parameters(ndarrays)
+            self.structure.append(np.shape(i))
+            print(np.shape(i))
+        parameters = ndarrays_to_sparse_parameters(ndarrays)
+        return parameters
 
     def configure_fit(
         self, server_round: int, parameters: Parameters, client_manager: ClientManager
@@ -77,7 +81,7 @@ class FedCustom(fl.server.strategy.Strategy):
         standard_config = {
             "lr": 0.001,
             "server_round": server_round,
-            "local_epochs": 3,
+            "local_epochs": self.config.local_epoch,
             "device": self.config.device,
             "sparse_dense": self.config.sparse_dense,
             "structure": self.structure,
@@ -85,7 +89,7 @@ class FedCustom(fl.server.strategy.Strategy):
         higher_lr_config = {
             "lr": 0.003,
             "server_round": server_round,
-            "local_epochs": 3,
+            "local_epochs": self.config.local_epoch,
             "device": self.config.device,
             "sparse_dense": self.config.sparse_dense,
             "structure": self.structure,
@@ -108,18 +112,41 @@ class FedCustom(fl.server.strategy.Strategy):
     ) -> Tuple[Optional[Parameters], Dict[str, Scalar]]:
         """Aggregate fit results using weighted average."""
 
-        weights_results = [
-            (
-                sparse_parameters_to_ndarrays(fit_res.parameters, self.structure),
-                fit_res.num_examples,
-            )
-            for _, fit_res in results
-        ]
-        parameters_aggregated = aggregate(weights_results)
+        if self.config.sparse_dense == 1:
+            weights_results = [
+                (
+                    sparse_parameters_to_ndarrays(fit_res.parameters, self.structure),
+                    fit_res.num_examples,
+                )
+                for _, fit_res in results
+            ]
+            result = aggregate(weights_results)
+        else:
+            parameters = []
+            sparse_matrixes = []
+            for _, fit_res in results:
+                params = efficient_communication_sparse_parameters_to_ndarrays(
+                    fit_res.parameters,
+                    self.structure,
+                    self.config.sparse_dense,
+                    fit_res.random_state,
+                )
+                parameters.append([p[0] for p in params])
+                sparse_matrixes.append([p[1] for p in params])
+
+            parameters_aggregated = self.client_matrices_aggregate(parameters)
+            sparse_aggregated = self.client_matrices_aggregate(sparse_matrixes)
+
+            result = [
+                p / (s + 1) for p, s in zip(parameters_aggregated, sparse_aggregated)
+            ]
+
         metrics_aggregated = {}
+        print(len(result))
         param = ndarrays_to_sparse_parameters(
-            sum_grad(self.model, parameters_aggregated)
+            sum_grad(self.model, result, server_round)
         )
+
         return param, metrics_aggregated
 
     def configure_evaluate(
@@ -191,3 +218,11 @@ class FedCustom(fl.server.strategy.Strategy):
         """Use a fraction of available clients for evaluation."""
         num_clients = int(num_available_clients * self.fraction_evaluate)
         return max(num_clients, self.min_evaluate_clients), self.min_available_clients
+
+    def client_matrices_aggregate(self, ndarray_list):
+
+        weighted_weights = [[layer for layer in weights] for weights in ndarray_list]
+        weights = [
+            reduce(np.add, layer_updates) for layer_updates in zip(*weighted_weights)
+        ]
+        return weights

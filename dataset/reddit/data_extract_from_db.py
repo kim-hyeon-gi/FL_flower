@@ -43,7 +43,7 @@ for row in data:
     body_value = row[1]
 
     if current_id != id_value:
-        if 500 <= current_word_count <= 150000:  # 1600~45000
+        if 1600 <= current_word_count <= 45000:  # 1600~45000
             writer.writerow([current_body])
             row_num = row_num + 1
 
