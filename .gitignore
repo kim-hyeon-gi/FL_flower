@@ -3,5 +3,5 @@ dataset/cifar10
 dataset/reddit/client.csv
 dataset/reddit/server_data.txt
 dataset/reddit/database.sqlite
-model_pt
+model_pt/*.pt
 runs
