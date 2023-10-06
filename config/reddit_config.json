@@ -1,6 +1,6 @@
 {
     "data": "reddit",
-    "model": "lstm",
+    "model_name": "lstm",
     "model_pt_path": "None",
     "device": "cpu",
     "server_device": "cuda",
