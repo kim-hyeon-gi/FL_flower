@@ -1,0 +1,22 @@
+{
+    "data": "cifar10",
+    "model_name": "Net",
+    "model_pt_path": "None",
+    "device": "cuda",
+    "server_device": "cuda",
+    "server_pretrain_epoch": 3,
+    "fraction_fit": 0.3,
+    "fraction_evaluate": 0.0,
+    "min_fit_clients": 2,
+    "min_evaluate_clients": 0,
+    "min_available_clients": 2,
+    "num_clients": 5,
+    "batch_size": 64,
+    "num_rounds": 2500,
+    "local_epoch": 1,
+    "sparse_dense": 1,
+    "low_rank": 1,
+    "lr": 0.05,
+    "client_lr": 0.0005,
+    "quantization_bit": 4
+}

@@ -2,7 +2,7 @@ import datasets
 import torch
 import torchtext
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset, random_split
 from torchtext.vocab import build_vocab_from_iterator
 from torchvision.datasets import CIFAR10
 
@@ -12,7 +12,10 @@ from utils import Config
 
 def load_dataset(config):
     if config.data == "cifar10":
-        return load_cifar10_dataset(config)
+        if config.iid == "True":
+            return load_cifar10_dataset(config)
+        else:
+            return load_none_iid_cifar10_dataset(config)
     elif config.data == "reddit":
         return load_reddit_dataset(config)
 
@@ -32,7 +35,9 @@ def load_cifar10_dataset(config):
     )
 
     # Split training set into 10 partitions to simulate the individual dataset
-
+    clientset, server_trainset = random_split(
+        clientset, [30000, 20000], torch.Generator().manual_seed(42)
+    )
     partition_size = len(clientset) // NUM_CLIENTS
     lengths = [partition_size] * NUM_CLIENTS
     datasets = random_split(clientset, lengths, torch.Generator().manual_seed(42))
@@ -45,18 +50,77 @@ def load_cifar10_dataset(config):
         len_train = len(ds) - len_val
         lengths = [len_train, len_val]
         ds_train, ds_val = random_split(ds, lengths, torch.Generator().manual_seed(42))
-        client_trainloaders.append(
-            DataLoader(ds_train, batch_size=BATCH_SIZE, shuffle=True)
-        )
+        client_trainloaders.append(DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True))
         client_valloaders.append(DataLoader(ds_val, batch_size=BATCH_SIZE))
-    len_te = len(serverset) // 10
-    len_tr = len(serverset) - len_te
-    server_train, server_test = random_split(
-        serverset, [len_tr, len_te], torch.Generator().manual_seed(42)
-    )
-    server_trainloader = DataLoader(server_train, batch_size=BATCH_SIZE)
-    server_testloader = DataLoader(server_test, batch_size=BATCH_SIZE)
+    server_trainloader = DataLoader(server_trainset, batch_size=BATCH_SIZE)
+    server_testloader = DataLoader(serverset, batch_size=BATCH_SIZE)
     return client_trainloaders, client_valloaders, server_trainloader, server_testloader
+
+
+def load_none_iid_cifar10_dataset(config):
+    # Download and transform CIFAR-10 (train and test)
+    NUM_CLIENTS = config.num_clients
+    BATCH_SIZE = config.batch_size
+    transform = transforms.Compose(
+        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+    )
+    clientset = CIFAR10(
+        "./dataset/cifar10", train=True, download=True, transform=transform
+    )
+    serverset = CIFAR10(
+        "./dataset/cifar10", train=False, download=True, transform=transform
+    )
+
+    # Split training set into 10 partitions to simulate the individual dataset
+
+    target_idx = [[] for _ in range(10)]
+    pretrain_idx = []
+    for i in range(10):
+        n = 0
+        for idx, label in enumerate(clientset.targets):
+            if label == i:
+                if n < 3000:
+                    target_idx[i].append(idx)
+                    n = n + 1
+                else:
+                    pretrain_idx.append(idx)
+
+    server_trainset = Subset(clientset, pretrain_idx)
+
+    # Split each partition into train/val and create DataLoader
+    client_trainloaders = []
+    client_valloaders = []
+    client_label_kind = 6
+    data = []
+    data_slice = int(300 / client_label_kind)
+    for i in range(60):
+        for j in range(10):
+            data.append(target_idx[j][i * 50 : (i + 1) * 50])
+
+    for i in range(100):
+        data_indice = (
+            data[6 * i]
+            + data[6 * i + 1]
+            + data[6 * i + 2]
+            + data[6 * i + 3]
+            + data[6 * i + 4]
+            + data[6 * i + 5]
+        )
+        dataset = Subset(clientset, data_indice)
+        client_trainloaders.append(
+            DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+        )
+
+    server_trainloader = DataLoader(
+        server_trainset, batch_size=BATCH_SIZE, shuffle=True
+    )
+    server_testloader = DataLoader(serverset, batch_size=BATCH_SIZE)
+    return (
+        client_trainloaders,
+        client_trainloaders,
+        server_trainloader,
+        server_testloader,
+    )
 
 
 def load_reddit_dataset(config):

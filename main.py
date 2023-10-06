@@ -15,7 +15,8 @@ from dataset.load_dataset import load_dataset
 from model.utils import load_model
 from server.base_strategy import base_strategy
 from server.Fed_Custom import FedCustom
-from utils import Config, get_parameters, set_parameters
+from sim_app import start_simulation
+from utils import Config, config_validation, get_parameters, set_parameters
 
 # import torch.nn as nn
 # import torch.nn.functional as F
@@ -41,10 +42,10 @@ def main(parser):
     )
     NUM_CLIENTS = config.num_clients
     BATCH_SIZE = config.batch_size
-
+    config_validation(config)
     client_resources = {"num_cpus": 24}
     if config.device == "cuda":
-        client_resources = {"num_gpus": 1}
+        client_resources = {"num_gpus": 1, "num_cpus": 24}
     trainloaders, valloaders, _, server_testloader = load_dataset(config)
 
     def client_fn(cid) -> FlowerClient:
@@ -54,12 +55,21 @@ def main(parser):
         return FlowerClient(cid, net, trainloader, valloader)
 
     # Start simulation
-    fl.simulation.start_simulation(
+    # fl.simulation.start_simulation(
+    #     client_fn=client_fn,
+    #     num_clients=NUM_CLIENTS,
+    #     config=fl.server.ServerConfig(num_rounds=config.num_rounds),
+    #     strategy=FedCustom(config, server_testloader, writer=writer),
+    #     client_resources=client_resources,
+    # )
+
+    start_simulation(
         client_fn=client_fn,
         num_clients=NUM_CLIENTS,
+        client_resources={"num_cpus": 1, "num_gpus": 0.1},
+        ray_init_args={"num_gpus": 1},
         config=fl.server.ServerConfig(num_rounds=config.num_rounds),
         strategy=FedCustom(config, server_testloader, writer=writer),
-        client_resources=client_resources,
     )
     writer.close()
 

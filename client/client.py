@@ -10,17 +10,19 @@ from flwr.common import (
     Status,
 )
 
-from model.utils import load_model, test, train
-from utils import (
-    Config,
-    FitRes,
-    efficient_communication_ndarrays_to_sparse_parameters,
-    get_grad,
-    get_parameters,
+from communication.base_utils import (
     ndarrays_to_sparse_parameters,
-    set_parameters,
     sparse_parameters_to_ndarrays,
 )
+from communication.low_rank_utils import low_rank_ndarrays_to_sparse_parameters
+from communication.prob_quantization_utils import (
+    prob_quantization_ndarrays_to_sparse_parameters,
+)
+from communication.sparse_utils import (
+    efficient_communication_ndarrays_to_sparse_parameters,
+)
+from model.utils import load_model, low_rank_train, test, train
+from utils import Config, FitRes, get_grad, get_parameters, set_parameters
 
 
 class FlowerClient(fl.client.Client):
@@ -49,6 +51,10 @@ class FlowerClient(fl.client.Client):
     def fit(self, ins: FitIns) -> FitRes:
         print(f"[Client {self.cid}] fit, config: {ins.config}")
         config = ins.config
+        params = []
+        random_state = []
+        V_value = []
+        parameters_updated = []
         # Deserialize parameters to NumPy ndarray's
         parameters_original = ins.parameters
         ndarrays_original = sparse_parameters_to_ndarrays(
@@ -56,29 +62,33 @@ class FlowerClient(fl.client.Client):
         )
         # Update local model, train, get updated parameters
         set_parameters(self.net, ndarrays_original)
+        # if config["low_rank_p_value"] == []:
         train(
             self.net,
             self.trainloader,
             device=config["device"],
             epochs=config["local_epochs"],
+            model_name=config["model_name"],
+            lr=config["client_lr"],
         )
         ndarrays_updated = get_parameters(self.net)
-        params = []
-        random_state = []
         for i in range(len(ndarrays_updated)):
             arr = ndarrays_updated[i] - ndarrays_original[i]
             params.append(arr)
-
         # Serialize ndarray's into a Parameters object
-        if config["sparse_dense"] == 1:
-            parameters_updated = ndarrays_to_sparse_parameters(params)
-        else:
-            (
-                parameters_updated,
-                random_state,
-            ) = efficient_communication_ndarrays_to_sparse_parameters(
-                params, config["structure"], config["sparse_dense"]
-            )
+        parameters_updated = ndarrays_to_sparse_parameters(params)
+        # else:
+        #     V_value, random_state = low_rank_train(
+        #         self.net,
+        #         self.trainloader,
+        #         device=config["device"],
+        #         epochs=config["local_epochs"],
+        #         model_name=config["model_name"],
+        #         lr=config["client_lr"],
+        #         structure=config["structure"],
+        #         shape_2d=config["shape_2d"],
+        #         p_value=config["low_rank_p_value"],
+        #     )
 
         # Build and return response
         status = Status(code=Code.OK, message="Success")
@@ -87,6 +97,7 @@ class FlowerClient(fl.client.Client):
             parameters=parameters_updated,
             num_examples=len(self.trainloader),
             random_state=random_state,
+            V_value=V_value,
             metrics={},
         )
 
